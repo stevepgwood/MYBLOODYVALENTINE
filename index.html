@@ -179,9 +179,9 @@
       loadSound('assets/woman_hit2.mp3').then(buffer => womanHitBuffer2 = buffer),
       loadSound('assets/woman_hit3.mp3').then(buffer => womanHitBuffer3 = buffer),
       loadSound('assets/death.mp3').then(buffer => deathBuffer = buffer) // add your death sound here
-      ]).then(() => {
-      console.log("All sounds loaded");
-    });
+]).then(() => {
+  console.log("All sounds loaded, including the death sound!");
+});
     function playSound(buffer) {
       if (!buffer) return;
       const source = audioContext.createBufferSource();
