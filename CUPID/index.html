@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- Mobile optimization for that iPhone Safari drip, no cap -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Cupid’s Adventure - Obstacles, Pipes & Blood Splatter</title>
+  <style>
+    /* Reset and full screen setup—vibes only */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #e0f7fa;
+      font-family: sans-serif;
+      overflow: hidden;
+    }
+    /* Canvas container locked to full screen—no chill */
+    #canvasContainer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+    }
+    /* Canvas fills the container—real one style */
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+    }
+    /* Start and Game Over screens—snatched vibes */
+    #startScreen, #gameOverScreen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      z-index: 20;
+    }
+    button {
+      font-size: 20px;
+      padding: 10px 20px;
+      margin: 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    button:hover {
+      background: #ff4081;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <!-- Start Screen -->
+  <div id="startScreen">
+    <h1>Welcome to Cupid’s Adventure—Let’s get it, periodt!</h1>
+    <button id="startButton">Start Game</button>
+  </div>
+
+  <!-- Canvas Container -->
+  <div id="canvasContainer">
+    <canvas id="gameCanvas"></canvas>
+  </div>
+
+  <!-- Game Over Screen -->
+  <div id="gameOverScreen" style="display: none;">
+    <h1>Game Over, fam! You got hit—no crumbs left!</h1>
+    <button id="restartButton">Restart</button>
+  </div>
+
+  <script>
+    // Helper function to play sound by cloning the preloaded audio node.
+    function playSound(audioObj) {
+      let clone = audioObj.cloneNode(true);
+      clone.play();
+    }
+
+    // Grab canvas, context, and container
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const container = document.getElementById('canvasContainer');
+
+    // Global game state and variables
+    let gameState = 'start'; // "start", "playing", or "gameover"
+    let groundY = 0;         // Invisible ground level
+    let bgX = 0;             // For looping background scroll
+    let gameStartTime = 0;   // Set when game starts
+
+    // Global blood particles array for the blood splatter effect
+    let bloodParticles = [];
+
+    // Sound effect objects (ensure these files are in your assets folder)
+    const tapSound = new Audio('assets/tap.mp3');
+    const batHitSound = new Audio('assets/bat_hit.mp3');
+    const birdHitSound = new Audio('assets/bird_hit.mp3');
+    const manHitSounds = [
+      new Audio('assets/man_hit1.mp3'),
+      new Audio('assets/man_hit2.mp3'),
+      new Audio('assets/man_hit3.mp3')
+    ];
+
+    // Physics and speed constants
+    const gravity = 0.5;
+    const jumpImpulse = -10;
+    const arrowSpeed = 8;
+    const arrowWidth = 20;
+    const arrowHeight = 5;
+    const bgScrollSpeed = 2;   // Background scroll speed
+    const obstacleSpeed = 4;   // Speed for bat and bird obstacles
+    const manSpeed = 2;        // Man obstacles move slower
+
+    // Unique obstacle dimensions:
+    // Man: 30×80, Bat: 30×30, Bird: 50×40.
+    // For pipes, we use the natural dimensions of the pipe image.
+    const manWidth = 30, manHeight = 80;
+    const batWidth = 30, batHeight = 30;
+    const birdWidth = 50, birdHeight = 40;
+    const defaultPipeWidth = 50;  // Fallback width if pipe image not loaded
+
+    // Waiting box settings (for obstacles that are shot):
+    // Man waiting box: centered at top (20px from top)
+    let waitingBoxManWidth = manWidth * 2; // 60px
+    let waitingBoxManX = 0;               // computed in resizeCanvas
+    const waitingBoxManY = 20;            // 20px from top
+    const waitingBoxManHeight = manHeight; // 80px
+
+    // Bat waiting box: top-left (20px from left and top)
+    const waitingBoxBatX = 20;
+    const waitingBoxBatY = 20;
+    const waitingBoxBatWidth = batWidth * 2; // 60px
+    const waitingBoxBatHeight = batHeight;   // 30px
+
+    // Bird waiting box: top-right (20px from right and top)
+    let waitingBoxBirdWidth = birdWidth * 2; // 100px
+    let waitingBoxBirdX = 0;               // computed in resizeCanvas
+    const waitingBoxBirdY = 20;
+    const waitingBoxBirdHeight = birdHeight; // 40px
+
+    // Pipe obstacles: They use a custom image and preserve their natural proportions.
+    // Pipes are spawned separately and are not affected by arrow collisions.
+    let pipeSpawnInterval = 3000; // Spawn a pipe every 3000ms (3 seconds)
+    let nextPipeTime = Date.now() + pipeSpawnInterval;
+
+    // Obstacle spawn control for man, bat, and bird (ramp up over time)
+    let initialObstacleSpawnInterval = 1500; // start at 1500ms
+    let minObstacleSpawnInterval = 500;      // don't go below 500ms
+    let obstacleSpawnInterval = initialObstacleSpawnInterval;
+    // Probabilities: 10% for man, 45% for bat, 45% for bird.
+    let nextObstacleTime = Date.now() + obstacleSpawnInterval;
+
+    // Load images
+    const cupidImg = new Image();       cupidImg.src = 'assets/cupid.png';
+    const arrowImg = new Image();       arrowImg.src = 'assets/arrow.png';
+    const bgImg = new Image();          bgImg.src = 'assets/background.png';
+    const manImg = new Image();         manImg.src = 'assets/man.png';
+    const batImg = new Image();         batImg.src = 'assets/bat.png';
+    const birdImg = new Image();        birdImg.src = 'assets/bird.png';
+    const pipeImg = new Image();        pipeImg.src = 'assets/pipe.png'; // Custom pipe image
+
+    // Cupid object
+    const cupid = { x: 50, y: 0, width: 40, height: 40, vy: 0 };
+
+    // Arrays for arrows and obstacles
+    const arrows = [];
+    const obstacles = []; // Each obstacle: x, y, width, height, state, type, waitingStart, arrivedTime, etc.
+
+    // Helper: Get a shrunk rectangle for tighter hit boxes
+    function getShrunkRect(obj, shrinkFactor) {
+      const offsetX = obj.width * shrinkFactor / 2;
+      const offsetY = obj.height * shrinkFactor / 2;
+      return {
+        x: obj.x + offsetX,
+        y: obj.y + offsetY,
+        width: obj.width * (1 - shrinkFactor),
+        height: obj.height * (1 - shrinkFactor)
+      };
+    }
+
+    // Standard AABB collision detection
+    function isColliding(r1, r2) {
+      return r1.x < r2.x + r2.width &&
+             r1.x + r1.width > r2.x &&
+             r1.y < r2.y + r2.height &&
+             r1.y + r1.height > r2.y;
+    }
+
+    // Resize canvas and update groundY and waiting box positions
+    function resizeCanvas() {
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+      groundY = canvas.height - 100; // 100px above bottom
+      if (cupid.y === 0 || cupid.y > groundY - cupid.height) {
+        cupid.y = groundY - cupid.height;
+      }
+      waitingBoxManX = (canvas.width - waitingBoxManWidth) / 2;
+      waitingBoxBirdX = canvas.width - waitingBoxBirdWidth - 20;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Draw looping full-screen background
+    function drawBackground() {
+      if (!bgImg.complete) {
+        ctx.fillStyle = "#87CEEB";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+      const tileWidth = bgImg.width;
+      const tileHeight = bgImg.height;
+      const tilesX = Math.ceil(canvas.width / tileWidth) + 1;
+      const tilesY = Math.ceil(canvas.height / tileHeight);
+      for (let j = 0; j < tilesY; j++) {
+        for (let i = 0; i < tilesX; i++) {
+          ctx.drawImage(bgImg, bgX + i * tileWidth, j * tileHeight, tileWidth, tileHeight);
+        }
+      }
+      bgX -= bgScrollSpeed;
+      if (bgX <= -tileWidth) {
+        bgX += tileWidth;
+      }
+    }
+
+    // Update blood particles (falling blood effect)
+    function updateBloodParticles() {
+      for (let i = bloodParticles.length - 1; i >= 0; i--) {
+        let p = bloodParticles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.2;
+        p.life++;
+        if (p.life > p.maxLife) {
+          bloodParticles.splice(i, 1);
+        }
+      }
+    }
+
+    // Update game physics and state
+    function update() {
+      if (gameState === 'playing') {
+        let elapsedTime = Date.now() - gameStartTime;
+        obstacleSpawnInterval = Math.max(minObstacleSpawnInterval, initialObstacleSpawnInterval - (elapsedTime / 1000) * 50);
+
+        // --- Update Cupid ---
+        cupid.vy += gravity;
+        cupid.y += cupid.vy;
+        if (cupid.y < 0) {
+          cupid.y = 0;
+          cupid.vy = -cupid.vy * 0.5;
+        }
+        if (cupid.y > groundY - cupid.height) {
+          cupid.y = groundY - cupid.height;
+          cupid.vy = 0;
+        }
+
+        // --- Update Arrows ---
+        for (let i = arrows.length - 1; i >= 0; i--) {
+          arrows[i].x += arrowSpeed;
+          if (arrows[i].x > canvas.width) {
+            arrows.splice(i, 1);
+          }
+        }
+
+        // --- Arrow Collision with Active Obstacles (skip pipes) ---
+        for (let i = arrows.length - 1; i >= 0; i--) {
+          let arrow = arrows[i];
+          for (let j = 0; j < obstacles.length; j++) {
+            let obs = obstacles[j];
+            if (obs.type === "pipe") continue;
+            if (obs.state === "active") {
+              let arrowHitBox = { x: arrow.x, y: arrow.y, width: arrow.width, height: arrow.height };
+              let obsHitBox = getShrunkRect(obs, 0.2);
+              if (isColliding(arrowHitBox, obsHitBox)) {
+                // Play hit sound based on obstacle type using cloned audio nodes
+                if (obs.type === "bat") {
+                  playSound(batHitSound);
+                } else if (obs.type === "bird") {
+                  playSound(birdHitSound);
+                } else if (obs.type === "man") {
+                  let index = Math.floor(Math.random() * manHitSounds.length);
+                  playSound(manHitSounds[index]);
+                }
+                obs.state = "waiting";
+                obs.waitingStart = Date.now();
+                obs.arrivedTime = null;
+                for (let k = 0; k < 5; k++) {
+                  bloodParticles.push({
+                    x: obs.x + Math.random() * obs.width,
+                    y: obs.y + obs.height,
+                    vx: (Math.random() - 0.5) * 1,
+                    vy: 1 + Math.random(),
+                    life: 0,
+                    maxLife: 60,
+                    size: 2 + Math.random() * 2
+                  });
+                }
+                for (let k = 0; k < 10; k++) {
+                  let direction = (Math.random() < 0.5) ? -1 : 1;
+                  bloodParticles.push({
+                    x: arrow.x,
+                    y: arrow.y + (arrow.height / 2),
+                    vx: direction * (2 + Math.random() * 3),
+                    vy: (Math.random() - 0.5) * 0.5,
+                    life: 0,
+                    maxLife: 30,
+                    size: 2
+                  });
+                }
+                arrows.splice(i, 1);
+                break;
+              }
+            }
+          }
+        }
+
+        // --- Spawn New Obstacles (Active) ---
+        if (Date.now() >= nextObstacleTime) {
+          let r = Math.random();
+          let newObstacle;
+          if (r < 0.10) {
+            newObstacle = {
+              x: canvas.width,
+              y: groundY - manHeight,
+              width: manWidth,
+              height: manHeight,
+              state: "active",
+              type: "man"
+            };
+          } else if (r < 0.55) {
+            let spawnY = 100 + Math.random() * (canvas.height - 250);
+            newObstacle = {
+              x: canvas.width,
+              y: spawnY,
+              width: batWidth,
+              height: batHeight,
+              state: "active",
+              type: "bat"
+            };
+          } else {
+            let spawnY = 50 + Math.random() * 100;
+            newObstacle = {
+              x: canvas.width,
+              y: spawnY,
+              width: birdWidth,
+              height: birdHeight,
+              state: "active",
+              type: "bird"
+            };
+            newObstacle.baseY = spawnY;
+            newObstacle.phase = Math.random() * 1000;
+          }
+          obstacles.push(newObstacle);
+          nextObstacleTime = Date.now() + obstacleSpawnInterval;
+        }
+
+        // --- Spawn New Pipes (Active) ---
+        if (Date.now() >= nextPipeTime) {
+          let pipeW, pipeH;
+          if (pipeImg.complete) {
+            pipeW = pipeImg.naturalWidth;
+            pipeH = pipeImg.naturalHeight;
+          } else {
+            pipeW = defaultPipeWidth;
+            pipeH = 150;
+          }
+          // Randomize vertical position so that the pipe's top is between canvas.height/2 and (canvas.height - pipeH)
+          let minPipeY = canvas.height / 2;
+          let maxPipeY = canvas.height - pipeH;
+          let pipeY = minPipeY + Math.random() * (maxPipeY - minPipeY);
+          let newPipe = {
+            x: canvas.width,
+            y: pipeY,
+            width: pipeW,
+            height: pipeH,
+            state: "active",
+            type: "pipe"
+          };
+          obstacles.push(newPipe);
+          nextPipeTime = Date.now() + pipeSpawnInterval;
+        }
+
+        // --- Update Active Obstacles ---
+        obstacles.forEach(obs => {
+          if (obs.state === "active") {
+            if (obs.type === "man") {
+              obs.x -= manSpeed;
+            } else if (obs.type === "pipe") {
+              obs.x -= bgScrollSpeed;
+            } else {
+              obs.x -= obstacleSpeed;
+            }
+            if (obs.type === "man") {
+              // No vertical movement
+            } else if (obs.type === "bat") {
+              obs.y += (Math.random() - 0.5) * 20;
+              obs.y = Math.max(0, Math.min(obs.y, canvas.height - obs.height));
+            } else if (obs.type === "bird") {
+              obs.y = obs.baseY + Math.sin((Date.now() + obs.phase) / 300) * 80;
+            }
+            if (obs.x + obs.width < 0) {
+              obs.toRemove = true;
+            }
+            let cupidHitBox = getShrunkRect(cupid, 0.2);
+            let obsHitBox = getShrunkRect(obs, 0.2);
+            if (isColliding(cupidHitBox, obsHitBox)) {
+              gameState = 'gameover';
+              document.getElementById('gameOverScreen').style.display = 'flex';
+              console.log("Collision detected—Game Over!");
+            }
+          }
+        });
+
+        // --- Update Waiting Obstacles by Type (Proportional Vertical Movement) ---
+        let waitingListMan = obstacles.filter(o => o.state === "waiting" && o.type === "man");
+        waitingListMan.sort((a, b) => a.waitingStart - b.waitingStart);
+        waitingListMan.forEach((obs, index) => {
+          let targetX = waitingBoxManX + index * manWidth;
+          let targetY = waitingBoxManY;
+          let dx = targetX - obs.x;
+          let dy = targetY - obs.y;
+          obs.x += dx * 0.2;
+          obs.y += dy * 0.2;
+          if (!obs.arrivedTime && Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+            obs.arrivedTime = Date.now();
+          }
+        });
+
+        let waitingListBat = obstacles.filter(o => o.state === "waiting" && o.type === "bat");
+        waitingListBat.sort((a, b) => a.waitingStart - b.waitingStart);
+        waitingListBat.forEach((obs, index) => {
+          let targetX = waitingBoxBatX + index * batWidth;
+          let targetY = waitingBoxBatY;
+          let dx = targetX - obs.x;
+          let dy = targetY - obs.y;
+          obs.x += dx * 0.2;
+          obs.y += dy * 0.2;
+          if (!obs.arrivedTime && Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+            obs.arrivedTime = Date.now();
+          }
+        });
+
+        let waitingListBird = obstacles.filter(o => o.state === "waiting" && o.type === "bird");
+        waitingListBird.sort((a, b) => a.waitingStart - b.waitingStart);
+        waitingListBird.forEach((obs, index) => {
+          let targetX = waitingBoxBirdX + index * birdWidth;
+          let targetY = waitingBoxBirdY;
+          let dx = targetX - obs.x;
+          let dy = targetY - obs.y;
+          obs.x += dx * 0.2;
+          obs.y += dy * 0.2;
+          if (!obs.arrivedTime && Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+            obs.arrivedTime = Date.now();
+          }
+        });
+
+        // --- Spawn Continuous Blood Particles from Waiting Obstacles with Exponential Decay ---
+        obstacles.forEach(obs => {
+          if (obs.state === "waiting") {
+            let t = Date.now() - obs.waitingStart;
+            let spawnRate = 2 * Math.exp(-t / 1000);
+            let numParticles = Math.floor(spawnRate);
+            if (Math.random() < (spawnRate - numParticles)) {
+              numParticles++;
+            }
+            for (let i = 0; i < numParticles; i++) {
+              bloodParticles.push({
+                x: obs.x + Math.random() * obs.width,
+                y: obs.y + obs.height,
+                vx: (Math.random() - 0.5) * 1,
+                vy: 1 + Math.random(),
+                life: 0,
+                maxLife: 60,
+                size: 2 + Math.random() * 2
+              });
+            }
+          }
+        });
+
+        // --- Update Blood Particles ---
+        updateBloodParticles();
+
+        // --- Check for Pairing in Waiting Boxes ---
+        if (waitingListMan.length >= 2) {
+          let first = waitingListMan[0], second = waitingListMan[1];
+          if (first.arrivedTime && second.arrivedTime) {
+            let pairArrivalTime = Math.max(first.arrivedTime, second.arrivedTime);
+            if (Date.now() - pairArrivalTime >= 1000) {
+              first.toRemove = true;
+              second.toRemove = true;
+            }
+          }
+        }
+        if (waitingListBat.length >= 2) {
+          let first = waitingListBat[0], second = waitingListBat[1];
+          if (first.arrivedTime && second.arrivedTime) {
+            let pairArrivalTime = Math.max(first.arrivedTime, second.arrivedTime);
+            if (Date.now() - pairArrivalTime >= 1000) {
+              first.toRemove = true;
+              second.toRemove = true;
+            }
+          }
+        }
+        if (waitingListBird.length >= 2) {
+          let first = waitingListBird[0], second = waitingListBird[1];
+          if (first.arrivedTime && second.arrivedTime) {
+            let pairArrivalTime = Math.max(first.arrivedTime, second.arrivedTime);
+            if (Date.now() - pairArrivalTime >= 1000) {
+              first.toRemove = true;
+              second.toRemove = true;
+            }
+          }
+        }
+
+        // --- Remove Obstacles Marked for Removal ---
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+          if (obstacles[i].toRemove) {
+            obstacles.splice(i, 1);
+          }
+        }
+      }
+    }
+
+    // Draw all game elements
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawBackground();
+
+      // (Optional) Visualize waiting boxes:
+      // ctx.strokeStyle = "yellow";
+      // ctx.strokeRect(waitingBoxManX, waitingBoxManY, waitingBoxManWidth, waitingBoxManHeight);
+      // ctx.strokeStyle = "purple";
+      // ctx.strokeRect(waitingBoxBatX, waitingBoxBatY, waitingBoxBatWidth, waitingBoxBatHeight);
+      // ctx.strokeStyle = "orange";
+      // ctx.strokeRect(waitingBoxBirdX, waitingBoxBirdY, waitingBoxBirdWidth, waitingBoxBirdHeight);
+
+      // Draw obstacles by type
+      obstacles.forEach(obs => {
+        if (obs.type === "man") {
+          if (manImg.complete) {
+            ctx.drawImage(manImg, obs.x, obs.y, obs.width, obs.height);
+          } else {
+            ctx.fillStyle = 'blue';
+            ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+          }
+        } else if (obs.type === "bat") {
+          if (batImg.complete) {
+            ctx.drawImage(batImg, obs.x, obs.y, obs.width, obs.height);
+          } else {
+            ctx.fillStyle = 'purple';
+            ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+          }
+        } else if (obs.type === "bird") {
+          if (birdImg.complete) {
+            ctx.drawImage(birdImg, obs.x, obs.y, obs.width, obs.height);
+          } else {
+            ctx.fillStyle = 'green';
+            ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+          }
+        } else if (obs.type === "pipe") {
+          if (pipeImg.complete) {
+            ctx.drawImage(pipeImg, obs.x, obs.y, obs.width, obs.height);
+          } else {
+            ctx.fillStyle = "green";
+            ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+          }
+        }
+      });
+
+      // Draw Cupid
+      if (cupidImg.complete) {
+        ctx.drawImage(cupidImg, cupid.x, cupid.y, cupid.width, cupid.height);
+      } else {
+        ctx.fillStyle = 'red';
+        ctx.fillRect(cupid.x, cupid.y, cupid.width, cupid.height);
+      }
+
+      // Draw arrows
+      arrows.forEach(arrow => {
+        if (arrowImg.complete) {
+          ctx.drawImage(arrowImg, arrow.x, arrow.y, arrow.width, arrow.height);
+        } else {
+          ctx.fillStyle = 'black';
+          ctx.fillRect(arrow.x, arrow.y, arrow.width, arrow.height);
+        }
+      });
+
+      // Draw blood particles
+      ctx.fillStyle = "red";
+      bloodParticles.forEach(p => {
+        ctx.fillRect(p.x, p.y, p.size, p.size);
+      });
+    }
+
+    // Main game loop
+    function gameLoop() {
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+    requestAnimationFrame(gameLoop);
+
+    // Updated touch event listener: a tap anywhere triggers both jump and shoot.
+    canvas.addEventListener('touchstart', function(e) {
+      e.preventDefault();
+      if (gameState === 'playing') {
+        playSound(tapSound);
+        cupid.vy = jumpImpulse;
+        arrows.push({
+          x: cupid.x + cupid.width,
+          y: cupid.y + (cupid.height / 2) - (arrowHeight / 2),
+          width: arrowWidth,
+          height: arrowHeight
+        });
+        console.log("Cupid jumped and arrow fired—no cap!");
+      }
+    }, {passive:false});
+
+    // Start Game function
+    function startGame(e) {
+      e.preventDefault();
+      if (gameState === 'start') {
+        gameState = 'playing';
+        gameStartTime = Date.now();
+        arrows.length = 0;
+        obstacles.length = 0;
+        nextObstacleTime = Date.now() + obstacleSpawnInterval;
+        nextPipeTime = Date.now() + pipeSpawnInterval;
+        bloodParticles = [];
+        document.getElementById('startScreen').style.display = 'none';
+        console.log("Game started—let's flex, no cap!");
+      }
+    }
+    const startButton = document.getElementById('startButton');
+    startButton.addEventListener('touchstart', startGame, {passive:false});
+    startButton.addEventListener('click', startGame);
+
+    // Restart Game function
+    function restartGame(e) {
+      e.preventDefault();
+      if (gameState === 'gameover') {
+        gameState = 'playing';
+        cupid.x = 50;
+        cupid.y = groundY - cupid.height;
+        cupid.vy = 0;
+        arrows.length = 0;
+        obstacles.length = 0;
+        nextObstacleTime = Date.now() + obstacleSpawnInterval;
+        nextPipeTime = Date.now() + pipeSpawnInterval;
+        gameStartTime = Date.now();
+        bloodParticles = [];
+        document.getElementById('gameOverScreen').style.display = 'none';
+        console.log("Restarting game—main character energy, periodt!");
+      }
+    }
+    const restartButton = document.getElementById('restartButton');
+    restartButton.addEventListener('touchstart', restartGame, {passive:false});
+    restartButton.addEventListener('click', restartGame);
+  </script>
+</body>
+</html>
