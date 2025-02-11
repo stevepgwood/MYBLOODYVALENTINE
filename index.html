@@ -159,6 +159,10 @@
     /*******************
      * AUDIO SETUP
      *******************/
+     let bgMusicBuffer, bgMusicSource = null;
+
+     let deathSource = null;
+
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     function loadSound(url) {
       return fetch(url)
@@ -178,6 +182,7 @@
       loadSound('assets/woman_hit1.mp3').then(buffer => womanHitBuffer1 = buffer),
       loadSound('assets/woman_hit2.mp3').then(buffer => womanHitBuffer2 = buffer),
       loadSound('assets/woman_hit3.mp3').then(buffer => womanHitBuffer3 = buffer),
+      loadSound('assets/bgmusic.mp3').then(buffer => bgMusicBuffer = buffer),
       loadSound('assets/death.mp3').then(buffer => deathBuffer = buffer) // add your death sound here
 ]).then(() => {
   console.log("All sounds loaded, including the death sound!");
@@ -483,11 +488,11 @@
                 // If invincible (auto-fire mode), drop 3x the blood splatter.
                 if (invincibleActive) {
                   // No sound effect or blood level increase in auto-fire mode.
-                  for (let k = 0; k < 5 * 3; k++) {
+                  for (let k = 0; k < 5 * 30; k++) {
                     bloodParticles.push({
                       x: obs.x + Math.random() * obs.width,
                       y: obs.y + obs.height,
-                      vx: (Math.random() - 0.5) * 1,
+                      vx: (Math.random() - 0.5) * 10,
                       vy: 1 + Math.random(),
                       life: 0,
                       maxLife: 60,
@@ -646,13 +651,29 @@
             let cupidHitBox = getShrunkRect(cupid, 0.2);
             let obsHitBox = getShrunkRect(obs, 0.2);
             if (!invincibleActive && isColliding(cupidHitBox, obsHitBox)) {
-              playSound(deathBuffer); // Drop that death sound on collision, no cap!
-              gameState = 'gameover';
-              // Save high score to leaderboard—using the name from title screen.
-              saveHighScore(document.getElementById('playerName').value, Math.floor(score));
-              showLeaderboard();
-              console.log("Collision detected—Game Over, fam!");
-            }
+  // Stop the background music before playing the death sound
+  if (bgMusicSource) {
+    try {
+      bgMusicSource.stop();
+    } catch (err) {
+      console.log("Error stopping background music:", err);
+    }
+    bgMusicSource = null;
+  }
+  
+  // Now play the death sound
+  deathSource = audioContext.createBufferSource();
+  deathSource.buffer = deathBuffer;
+  deathSource.connect(audioContext.destination);
+  deathSource.start(0);
+  
+  gameState = 'gameover';
+  saveHighScore(document.getElementById('playerName').value, Math.floor(score));
+  showLeaderboard();
+  console.log("Collision detected—Game Over, fam!");
+}
+
+
           }
         });
         
@@ -827,26 +848,39 @@
     });
     
     function startGame(e) {
-      e.preventDefault();
-      if (gameState === 'title') {
-        if (audioContext.state === 'suspended') { audioContext.resume(); }
-        document.getElementById('titleScreen').style.display = 'none';
-        // Big flex fix: re-show the canvas container so the game is lit.
-        document.getElementById('canvasContainer').style.display = 'block';
-        gameState = 'playing';
-        gameStartTime = Date.now();
-        lastUpdateTime = Date.now();
-        score = 0;
-        arrows.length = 0;
-        obstacles.length = 0;
-        nextObstacleTime = Date.now() + obstacleSpawnInterval;
-        nextPipeTime = Date.now() + pipeSpawnInterval;
-        bloodParticles = [];
-        // Reset auto-fire timer.
-        lastAutoFireTime = Date.now();
-        console.log("Game started—let's flex, no cap!");
-      }
+  e.preventDefault();
+  // If the death sound is still playing, stop it
+  if (deathSource) {
+    try {
+      deathSource.stop();
+    } catch(err) {
+      console.log("Error stopping death sound:", err);
     }
+    deathSource = null;
+  }
+  if (audioContext.state === 'suspended') { audioContext.resume(); }
+  document.getElementById('titleScreen').style.display = 'none';
+  document.getElementById('canvasContainer').style.display = 'block';
+  gameState = 'playing';
+  gameStartTime = Date.now();
+  lastUpdateTime = Date.now();
+  score = 0;
+  arrows.length = 0;
+  obstacles.length = 0;
+  nextObstacleTime = Date.now() + obstacleSpawnInterval;
+  nextPipeTime = Date.now() + pipeSpawnInterval;
+  bloodParticles = [];
+  lastAutoFireTime = Date.now();
+  if (bgMusicBuffer) {
+    bgMusicSource = audioContext.createBufferSource();
+    bgMusicSource.buffer = bgMusicBuffer;
+    bgMusicSource.loop = true;
+    bgMusicSource.connect(audioContext.destination);
+    bgMusicSource.start(0);
+  }
+  console.log("Game started—let's flex, no cap!");
+}
+
     const titleScreenDiv = document.getElementById('titleScreen');
     titleScreenDiv.addEventListener('touchstart', startGame, {passive:false});
     titleScreenDiv.addEventListener('click', startGame);
