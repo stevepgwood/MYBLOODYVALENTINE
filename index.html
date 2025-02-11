@@ -881,6 +881,14 @@
   console.log("Game started—let's flex, no cap!");
 }
 
+const playerNameInput = document.getElementById('playerName');
+playerNameInput.addEventListener('touchstart', function(e) {
+  e.stopPropagation();
+});
+playerNameInput.addEventListener('click', function(e) {
+  e.stopPropagation();
+});
+
     const titleScreenDiv = document.getElementById('titleScreen');
     titleScreenDiv.addEventListener('touchstart', startGame, {passive:false});
     titleScreenDiv.addEventListener('click', startGame);
