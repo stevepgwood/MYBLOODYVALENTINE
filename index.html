@@ -305,6 +305,11 @@
              r1.y < r2.y + r2.height &&
              r1.y + r1.height > r2.y;
     }
+
+    function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
     
     // BLOOD VILE & INVINCIBILITY SETUP
     let bloodLevel = 0;
@@ -620,6 +625,7 @@
           let newPipe = {
             x: canvas.width,
             y: pipeY,
+            normalY: pipeY, // Save its normal Y position
             width: pipeW,
             height: pipeH,
             state: "active",
@@ -631,23 +637,40 @@
         
         // Move obstacles and check for Cupid collisions.
         obstacles.forEach(obs => {
-          if (obs.state === "active") {
-            if (obs.type.startsWith("man") || obs.type.startsWith("woman")) {
-              obs.x -= manSpeed;
-            } else if (obs.type === "pipe") {
-              obs.x -= bgScrollSpeed;
-            } else {
-              obs.x -= obstacleSpeed;
-            }
-            if (obs.type === "bat") {
-              obs.y += (Math.random() - 0.5) * 20;
-              obs.y = Math.max(0, Math.min(obs.y, canvas.height - obs.height));
-            } else if (obs.type === "bird") {
-              obs.y = obs.baseY + Math.sin((Date.now() + obs.phase) / 300) * 80;
-            }
-            if (obs.x + obs.width < 0) {
-              obs.toRemove = true;
-            }
+  if (obs.state === "active") {
+    if (obs.type === "pipe") {
+      // Move horizontally as usual.
+      obs.x -= bgScrollSpeed;
+      
+      // Adjust vertical position:
+      if (invincibleActive) {
+        // While invincible, smoothly lower the pipe off-screen.
+        obs.y = lerp(obs.y, canvas.height, 0.02);
+      } else {
+        // Otherwise, return to its normal Y position (saved as normalY).
+        if (obs.normalY !== undefined) {
+          obs.y = lerp(obs.y, obs.normalY, 0.02);
+        }
+      }
+    } else if (obs.type.startsWith("man") || obs.type.startsWith("woman")) {
+      obs.x -= manSpeed;
+    } else {
+      // For all other obstacles (like bats, birds, etc.)
+      obs.x -= obstacleSpeed;
+    }
+    
+    // Additional adjustments for specific obstacle types.
+    if (obs.type === "bat") {
+      obs.y += (Math.random() - 0.5) * 20;
+      obs.y = Math.max(0, Math.min(obs.y, canvas.height - obs.height));
+    } else if (obs.type === "bird") {
+      obs.y = obs.baseY + Math.sin((Date.now() + obs.phase) / 300) * 80;
+    }
+    
+    // Remove the obstacle if it moves off-screen.
+    if (obs.x + obs.width < 0) {
+      obs.toRemove = true;
+    }
             let cupidHitBox = getShrunkRect(cupid, 0.2);
             let obsHitBox = getShrunkRect(obs, 0.2);
             if (!invincibleActive && isColliding(cupidHitBox, obsHitBox)) {
