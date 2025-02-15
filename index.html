@@ -1,9 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+
+  <!-- Firebase App (the core Firebase SDK) -->
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<!-- Firebase Firestore -->
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+<script>
+  // Your Firebase configuration (replace with your own config values)
+  var firebaseConfig = {
+    apiKey: "AIzaSyAxUpfRnzgh8cVTXiMwQV2KiG0y_Nm891U",
+  authDomain: "my-bloody-valentine.firebaseapp.com",
+  projectId: "my-bloody-valentine",
+  storageBucket: "my-bloody-valentine.firebasestorage.app",
+  messagingSenderId: "82416684644",
+  appId: "1:82416684644:web:2f4ecd6836b48a527a5971",
+  measurementId: "G-X2GC71M24Q"
+  };
+  // Initialize Firebase
+  firebase.initializeApp(firebaseConfig);
+  // Initialize Firestore
+  const db = firebase.firestore();
+</script>
+
+
   <meta charset="UTF-8">
   <!-- Mobile optimization for that iPhone Safari drip, no cap -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Cupid’s Adventure - Obstacles, Pipes & Blood Splatter</title>
   <style>
     /* Import custom font "Good Old DOS" */
@@ -116,6 +140,7 @@
   <div id="titleScreen">
     <img id="titleImage" src="assets/titlescreen.png" alt="Title Screen">
     <input type="text" id="playerName" maxlength="7" placeholder="Your Name">
+    <input type="text" id="contactInfo" placeholder="Phone/Email for prize">
     <div id="tapToPlay">(tap to play)</div>
   </div>
   
@@ -126,6 +151,7 @@
   
   <!-- Leaderboard Screen -->
   <div id="leaderboardScreen">
+    <div id="yourScore" style="font-size:20px; margin-bottom:10px; color:red;"></div>
     <h1>Leaderboard</h1>
     <div id="leaderboardList"></div>
     <div id="returnInstruction">(tap to return to title screen)</div>
@@ -210,13 +236,13 @@
     let score = 0;
     
     const gravity = 0.5;
-    const jumpImpulse = -10;
-    const arrowSpeed = 8;
+    const jumpImpulse = -13;
+    const arrowSpeed = 12;
     const arrowWidth = 20;
     const arrowHeight = 5;
-    const bgScrollSpeed = 2;
-    const obstacleSpeed = 6;
-    const manSpeed = 2;
+    const bgScrollSpeed = 4;
+    const obstacleSpeed = 8;
+    const manSpeed = 4.5;
     
     const manWidth = 50, manHeight = 120; // updated for bigger humans
     const batWidth = 30, batHeight = 30;
@@ -233,11 +259,11 @@
     let waitingBoxBirdX = 0;
     const waitingBoxBirdY = 20;
     
-    let pipeSpawnInterval = 3000;
+    let pipeSpawnInterval = 1500;
     let nextPipeTime = Date.now() + pipeSpawnInterval;
     
     let initialObstacleSpawnInterval = 1000;
-    let minObstacleSpawnInterval = 500;
+    let minObstacleSpawnInterval = 100;
     let obstacleSpawnInterval = initialObstacleSpawnInterval;
     let nextObstacleTime = Date.now() + obstacleSpawnInterval;
     
@@ -446,7 +472,7 @@
 
       if (gameState === 'playing') {
         let elapsedTime = Date.now() - gameStartTime;
-        obstacleSpawnInterval = Math.max(minObstacleSpawnInterval, initialObstacleSpawnInterval - (elapsedTime / 1000) * 50);
+        obstacleSpawnInterval = Math.max(minObstacleSpawnInterval, initialObstacleSpawnInterval - (elapsedTime / 1000) * 20);
         
         // Cupid physics: jump, gravity, etc.
         cupid.vy += gravity;
@@ -595,7 +621,7 @@
       type: "bat"
     };
   } else {
-    let spawnY = 50 + Math.random() * 100;
+    let spawnY = 50 + Math.random() * 200;
     newObstacle = {
       x: canvas.width,
       y: spawnY,
@@ -681,6 +707,8 @@
             let cupidHitBox = getShrunkRect(cupid, 0.2);
             let obsHitBox = getShrunkRect(obs, 0.2);
             if (!invincibleActive && isColliding(cupidHitBox, obsHitBox)) {
+               // Reset blood meter when you lose
+              bloodLevel = 0;
   // Stop the background music before playing the death sound
   if (bgMusicSource) {
     try {
@@ -919,36 +947,83 @@ playerNameInput.addEventListener('click', function(e) {
   e.stopPropagation();
 });
 
+// Do the same for the contact input:
+const contactInput = document.getElementById('contactInfo');
+contactInput.addEventListener('touchstart', function(e) {
+  e.stopPropagation();
+});
+contactInput.addEventListener('click', function(e) {
+  e.stopPropagation();
+});
+
     const titleScreenDiv = document.getElementById('titleScreen');
     titleScreenDiv.addEventListener('touchstart', startGame, {passive:false});
     titleScreenDiv.addEventListener('click', startGame);
     
     function saveHighScore(name, score) {
-      name = name.trim() === "" ? "Anon" : name.trim();
-      let leaderboard = JSON.parse(localStorage.getItem("leaderboard") || "[]");
-      leaderboard.push({ name: name, score: score });
-      leaderboard.sort((a, b) => b.score - a.score);
-      leaderboard = leaderboard.slice(0, 10); // top 10
-      localStorage.setItem("leaderboard", JSON.stringify(leaderboard));
-    }
+  // Get and trim the player name; default to "Anon" if blank.
+  const playerName = name.trim() === "" ? "Anon" : name.trim();
+  // Get the contact info from the new text box.
+  const contact = document.getElementById('contactInfo').value.trim();
+  
+  // Add a new document to the "leaderboard" collection with a timestamp.
+  db.collection("leaderboard").add({
+    name: playerName,
+    score: score,
+    contact: contact,  // Save the contact info here.
+    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+  })
+  .then(() => {
+    console.log("High score and contact info saved to Firestore—no cap!");
+  })
+  .catch(error => {
+    console.error("Error saving score: ", error);
+  });
+}
+
+
     
-    function showLeaderboard() {
-      // Hide the game canvas.
-      document.getElementById('canvasContainer').style.display = 'none';
-      // Get leaderboard data.
-      let leaderboard = JSON.parse(localStorage.getItem("leaderboard") || "[]");
-      let listDiv = document.getElementById('leaderboardList');
-      listDiv.innerHTML = "";
-      leaderboard.forEach((entry, index) => {
-        let div = document.createElement("div");
-        div.textContent = `${index+1}. ${entry.name} - ${entry.score}`;
-        listDiv.appendChild(div);
+function showLeaderboard() {
+  // Hide your game canvas
+  document.getElementById('canvasContainer').style.display = 'none';
+  
+  // Display "Your Score" above the leaderboard.
+  const yourScoreDiv = document.getElementById('yourScore');
+  yourScoreDiv.textContent = "Your Score: " + Math.floor(score);
+
+  // Query Firestore for the top 10 scores ordered by score (highest first)
+  db.collection("leaderboard")
+    .orderBy("score", "desc")
+    .limit(10)
+    .get()
+    .then(querySnapshot => {
+      const leaderboard = [];
+      querySnapshot.forEach(doc => {
+        leaderboard.push(doc.data());
       });
-      // Show the leaderboard screen.
-      let lbScreen = document.getElementById('leaderboardScreen');
-      lbScreen.style.display = 'flex';
-      gameState = 'leaderboard';
-    }
+      
+      // Clear out your leaderboard list element
+      const listDiv = document.getElementById('leaderboardList');
+      listDiv.innerHTML = "";
+      
+      // Loop through and display each entry
+      leaderboard.forEach((entry, index) => {
+  const div = document.createElement("div");
+  // Only display name and score, ignore 'contact'
+  div.textContent = `${index + 1}. ${entry.name} - ${entry.score}`;
+  listDiv.appendChild(div);
+});
+
+    })
+    .catch(error => {
+      console.error("Error getting leaderboard: ", error);
+    });
+  
+  // Show the leaderboard screen
+  document.getElementById('leaderboardScreen').style.display = 'flex';
+  gameState = 'leaderboard';
+}
+
     
     // Tapping the leaderboard screen returns to the title screen.
     const leaderboardScreenDiv = document.getElementById('leaderboardScreen');
